@@ -1,135 +1,92 @@
-import { PrismaClient } from '@prisma/client';
-import googleKeywordService from './googleKeywordService';
+import { PrismaClient, Keyword, Prisma } from '@prisma/client';
+import keywordService from './keywordService';
 import naverKeywordService from './naverKeywordService';
 import { prisma } from '@/lib/prisma';
+
+interface KeywordData {
+  keyword: string;
+  searchVolume: number;
+  competition: number;
+  cpc: number;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
 
 interface KeywordAnalysisResult {
   keyword: string;
   searchVolume: number;
+  competition: number;
+  cpc: number;
   difficulty: number;
-  trend: 'UP' | 'DOWN' | 'SAME';
-  category?: string;
-  relatedKeywords: string[];
+  trend: number[];
 }
 
 /**
  * 키워드 데이터를 분석하고 저장합니다.
  */
-export async function analyzeAndStoreKeyword(keyword: string, category?: string): Promise<KeywordAnalysisResult | null> {
+export async function analyzeAndStoreKeyword(searchKeyword: string): Promise<Keyword> {
   try {
-    // Google 키워드 데이터 가져오기
-    const googleData = await googleKeywordService.getKeywordData([keyword]);
-    const googleKeyword = googleData[0];
-
-    if (!googleKeyword) {
-      console.warn(`Google 키워드 데이터를 찾을 수 없음: ${keyword}`);
-      return null;
-    }
-
-    // Naver 키워드 데이터 가져오기
-    const naverData = await naverKeywordService.getNaverKeywordData(keyword);
-    const naverTrend = await naverKeywordService.getNaverKeywordTrend(keyword);
-
-    // 경쟁 강도 계산
-    const difficulty = googleKeywordService.calculateKeywordDifficulty(
-      googleKeyword.competition,
-      googleKeyword.searchVolume,
-      googleKeyword.cpc
-    );
-
-    // 관련 키워드 추출
-    const relatedKeywords = naverData
-      .filter(item => item.keyword !== keyword)
-      .map(item => item.keyword);
-
-    // 분석 결과 생성
-    const analysisResult: KeywordAnalysisResult = {
-      keyword,
-      searchVolume: googleKeyword.searchVolume,
-      difficulty,
-      trend: naverTrend?.trend || 'SAME',
-      category,
-      relatedKeywords
-    };
-
-    // 데이터베이스에 저장
-    const storedKeyword = await prisma.keyword.upsert({
-      where: { term: keyword },
-      update: {
-        searchVolume: googleKeyword.searchVolume,
-        difficulty,
-        category,
-        updatedAt: new Date()
-      },
-      create: {
-        term: keyword,
-        searchVolume: googleKeyword.searchVolume,
-        difficulty,
-        category,
-        createdAt: new Date(),
-        updatedAt: new Date()
+    // 이미 존재하는 키워드인지 확인
+    const existingKeyword = await prisma.keyword.findUnique({
+      where: {
+        keyword: searchKeyword
       }
     });
 
-    // 키워드 트렌드 데이터 저장
-    if (naverTrend?.data) {
-      await Promise.all(
-        naverTrend.data.map(async (point) => {
-          await prisma.keywordTrend.upsert({
-            where: {
-              keywordId_date: {
-                keywordId: storedKeyword.id,
-                date: new Date(point.period)
-              }
-            },
-            update: {
-              volume: Math.round(point.ratio * googleKeyword.searchVolume)
-            },
-            create: {
-              keywordId: storedKeyword.id,
-              date: new Date(point.period),
-              volume: Math.round(point.ratio * googleKeyword.searchVolume)
-            }
-          });
-        })
+    // 이미 존재하는 경우 업데이트
+    if (existingKeyword) {
+      // 키워드 데이터 가져오기
+      const googleData = await keywordService.getKeywordData(searchKeyword);
+
+      // 경쟁 강도 계산
+      const difficulty = keywordService.calculateKeywordDifficulty(
+        googleData.competition,
+        googleData.searchVolume,
+        googleData.cpc
       );
+
+      return await prisma.keyword.update({
+        where: {
+          id: existingKeyword.id
+        },
+        data: {
+          searchVolume: googleData.searchVolume,
+          competition: googleData.competition,
+          cpc: googleData.cpc,
+          difficulty: difficulty,
+          trend: [],
+          lastUpdated: new Date()
+        }
+      });
     }
 
-    // 연관 키워드 저장
-    await Promise.all(
-      relatedKeywords.map(async (relatedKeyword) => {
-        const relatedKeywordRecord = await prisma.keyword.upsert({
-          where: { term: relatedKeyword },
-          update: {},
-          create: {
-            term: relatedKeyword,
-            searchVolume: 0,
-            difficulty: 0,
-            category,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          }
-        });
+    // 새로운 키워드인 경우 생성
+    const googleData = await keywordService.getKeywordData(searchKeyword);
 
-        await prisma.relatedKeyword.upsert({
-          where: {
-            keywordId_relatedToId: {
-              keywordId: storedKeyword.id,
-              relatedToId: relatedKeywordRecord.id
-            }
-          },
-          update: {},
-          create: {
-            keywordId: storedKeyword.id,
-            relatedToId: relatedKeywordRecord.id
-          }
-        });
-      })
+    // 경쟁 강도 계산
+    const difficulty = keywordService.calculateKeywordDifficulty(
+      googleData.competition,
+      googleData.searchVolume,
+      googleData.cpc
     );
 
-    return analysisResult;
+    // 데이터베이스에 저장
+    return await prisma.keyword.create({
+      data: {
+        keyword: searchKeyword,
+        searchVolume: googleData.searchVolume,
+        competition: googleData.competition,
+        cpc: googleData.cpc,
+        difficulty: difficulty,
+        trend: [],
+        lastUpdated: new Date()
+      }
+    });
   } catch (error) {
-    console.error('키워드 분석 및 저장 오류:', error);
+    console.error('키워드 분석 및 저장 중 오류 발생:', error);
     throw error;
   }
 }
@@ -138,48 +95,27 @@ export async function analyzeAndStoreKeyword(keyword: string, category?: string)
  * 저장된 키워드 데이터를 검색합니다.
  */
 export async function searchKeywords(
-  query: string,
-  category?: string,
+  searchTerm: string,
   page: number = 1,
   pageSize: number = 10
-) {
+): Promise<Keyword[]> {
   try {
-    const where = {
-      AND: [
-        { term: { contains: query } },
-        category ? { category } : {}
-      ]
-    };
-
-    const totalCount = await prisma.keyword.count({ where });
-    const keywords = await prisma.keyword.findMany({
-      where,
-      include: {
-        keywordTrend: {
-          orderBy: { date: 'desc' },
-          take: 3
-        },
-        related: {
-          include: {
-            relatedTo: true
-          }
+    const skip = (page - 1) * pageSize;
+    return await prisma.keyword.findMany({
+      where: {
+        keyword: {
+          contains: searchTerm,
+          mode: 'insensitive'
         }
       },
       orderBy: {
         searchVolume: 'desc'
       },
-      skip: (page - 1) * pageSize,
+      skip,
       take: pageSize
     });
-
-    return {
-      keywords,
-      totalCount,
-      currentPage: page,
-      totalPages: Math.ceil(totalCount / pageSize)
-    };
   } catch (error) {
-    console.error('키워드 검색 오류:', error);
+    console.error('키워드 검색 중 오류 발생:', error);
     throw error;
   }
 }
@@ -187,32 +123,45 @@ export async function searchKeywords(
 /**
  * 인기 키워드를 가져옵니다.
  */
-export async function getPopularKeywords(
-  category?: string,
-  limit: number = 10
-) {
+export async function getPopularKeywords(limit: number = 10): Promise<Keyword[]> {
   try {
     return await prisma.keyword.findMany({
-      where: category ? { category } : {},
       orderBy: {
         searchVolume: 'desc'
       },
-      take: limit,
-      include: {
-        keywordTrend: {
-          orderBy: { date: 'desc' },
-          take: 3
-        }
+      take: limit
+    });
+  } catch (error) {
+    console.error('인기 키워드 조회 중 오류 발생:', error);
+    throw error;
+  }
+}
+
+export async function getStoredKeywordData(searchKeyword: string): Promise<Keyword | null> {
+  try {
+    return await prisma.keyword.findUnique({
+      where: {
+        keyword: searchKeyword
       }
     });
   } catch (error) {
-    console.error('인기 키워드 조회 오류:', error);
+    console.error('키워드 데이터 조회 중 오류 발생:', error);
     throw error;
   }
+}
+
+export function calculateTrendPoints(trend: number[]): Point[] {
+  const maxValue = Math.max(...trend);
+  return trend.map((value, index) => ({
+    x: index,
+    y: maxValue > 0 ? (value / maxValue) * 100 : 0
+  }));
 }
 
 export default {
   analyzeAndStoreKeyword,
   searchKeywords,
-  getPopularKeywords
+  getPopularKeywords,
+  getStoredKeywordData,
+  calculateTrendPoints
 }; 

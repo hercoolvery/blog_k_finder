@@ -43,7 +43,15 @@ export default function Home() {
       const response = await axios.get(`/api/keywords?query=${encodeURIComponent(keyword)}&category=${category}`);
       
       if (response.data.success) {
-        setResults(response.data.results);
+        // 데이터 구조 매핑
+        const mappedResults = response.data.keywords.map((item: any) => ({
+          keyword: item.term,
+          volume: item.searchVolume,
+          difficulty: item.difficulty,
+          trend: item.trend || "일정",
+          related: item.related || []
+        }));
+        setResults(mappedResults);
       } else {
         setError('키워드 검색에 실패했습니다.');
       }

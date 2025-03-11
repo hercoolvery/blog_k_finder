@@ -29,29 +29,17 @@ model User {
 // 키워드 모델
 model Keyword {
   id           String         @id @default(cuid())
-  term         String         @unique
-  searchVolume Int?
-  difficulty   Float?
-  category     String?
+  keyword      String         @unique
+  searchVolume Int
+  competition  Float
+  cpc          Float
+  difficulty   Float
+  trend        Int[]
+  lastUpdated  DateTime
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
-  keywordTrend KeywordTrend[]
   saved        SavedKeyword[]
   searches     Search[]
-  related      RelatedKeyword[] @relation("RelatedFrom")
-  relatedTo    RelatedKeyword[] @relation("RelatedTo")
-}
-
-// 키워드 트렌드 모델 (시간에 따른 검색량 데이터)
-model KeywordTrend {
-  id        String   @id @default(cuid())
-  keywordId String
-  keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
-  date      DateTime
-  volume    Int
-  createdAt DateTime @default(now())
-
-  @@unique([keywordId, date])
 }
 
 // 사용자가 저장한 키워드 모델
@@ -76,18 +64,6 @@ model Search {
   keywordId String
   keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
-}
-
-// 연관 키워드 모델
-model RelatedKeyword {
-  id            String  @id @default(cuid())
-  keywordId     String
-  keyword       Keyword @relation("RelatedFrom", fields: [keywordId], references: [id], onDelete: Cascade)
-  relatedToId   String
-  relatedTo     Keyword @relation("RelatedTo", fields: [relatedToId], references: [id], onDelete: Cascade)
-  relevanceScore Float?
-
-  @@unique([keywordId, relatedToId])
 }
 
 // 블로그 카테고리 모델

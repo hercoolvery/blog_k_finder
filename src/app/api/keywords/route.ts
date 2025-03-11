@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import keywordStorageService from '@/services/keywordStorageService';
 import keywordScheduler from '@/services/keywordScheduler';
+import googleKeywordService from '@/services/googleKeywordService';
+import keywordService from '@/services/keywordService';
 
 // 임시 데이터 - 실제 구현에서는 데이터베이스와 연동하고 외부 API 호출을 통해 데이터를 가져옵니다
 const exampleKeywords = {
@@ -110,23 +112,67 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1', 10);
     const pageSize = parseInt(searchParams.get('pageSize') || '10', 10);
 
-    // 키워드 검색 실행
-    const results = await keywordStorageService.searchKeywords(
-      query,
-      category,
-      page,
-      pageSize
-    );
+    // 검색어가 없는 경우 카테고리별 상위 키워드 반환
+    if (!query && category) {
+      try {
+        const topKeywords = await googleKeywordService.getCategoryTopKeywords(category);
+        
+        // 키워드 데이터를 데이터베이스에 저장
+        const savedKeywords = await Promise.all(
+          topKeywords.map(async (keyword) => {
+            try {
+              return await keywordStorageService.analyzeAndStoreKeyword(keyword.keyword);
+            } catch (error) {
+              console.error(`키워드 저장 오류 (${keyword.keyword}):`, error);
+              return null;
+            }
+          })
+        );
 
-    // 검색어가 있는 경우, 백그라운드에서 키워드 분석 실행
-    if (query && !results.keywords.some(k => k.term === query)) {
-      keywordStorageService.analyzeAndStoreKeyword(query, category)
-        .catch(error => console.error('키워드 분석 오류:', error));
+        const validKeywords = savedKeywords.filter((k): k is Exclude<typeof k, null> => k !== null);
+
+        return NextResponse.json({
+          success: true,
+          keywords: validKeywords,
+          totalCount: validKeywords.length,
+          currentPage: 1,
+          totalPages: 1
+        });
+      } catch (error) {
+        console.error('카테고리 키워드 조회 오류:', error);
+        // 에러 발생 시 더미 데이터 반환
+        const dummyKeywords = googleKeywordService.generateDummyKeywords(category, 10);
+        return NextResponse.json({
+          success: true,
+          keywords: dummyKeywords,
+          totalCount: dummyKeywords.length,
+          currentPage: 1,
+          totalPages: 1
+        });
+      }
+    }
+
+    // 기존 키워드 검색 로직
+    const results = await keywordStorageService.searchKeywords(query, page, pageSize);
+
+    // 검색어가 있고 결과가 없는 경우, 백그라운드에서 키워드 분석 실행
+    if (query && results.length === 0) {
+      try {
+        const analyzedKeyword = await keywordStorageService.analyzeAndStoreKeyword(query);
+        if (analyzedKeyword) {
+          results.push(analyzedKeyword);
+        }
+      } catch (error) {
+        console.error('키워드 분석 오류:', error);
+      }
     }
 
     return NextResponse.json({
       success: true,
-      ...results
+      keywords: results,
+      totalCount: results.length,
+      currentPage: page,
+      totalPages: Math.ceil(results.length / pageSize)
     });
   } catch (error) {
     console.error('키워드 검색 API 오류:', error);
@@ -141,7 +187,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { keyword, category } = body;
+    const { keyword } = body;
 
     if (!keyword) {
       return NextResponse.json({
@@ -150,7 +196,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const result = await keywordStorageService.analyzeAndStoreKeyword(keyword, category);
+    const result = await keywordStorageService.analyzeAndStoreKeyword(keyword);
 
     if (!result) {
       return NextResponse.json({

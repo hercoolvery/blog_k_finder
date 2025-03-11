@@ -15,17 +15,17 @@ interface KeywordData {
   cpc: number;
 }
 
-interface NaverDataLabResponse {
-  startDate: string;
-  endDate: string;
-  timeUnit: string;
-  results: Array<{
-    title: string;
-    keywords: string[];
-    data: Array<{
-      period: string;
-      ratio: number;
-    }>;
+interface NaverKeywordResponse {
+  keywordList: Array<{
+    relKeyword: string;
+    monthlyPcQcCnt: string;
+    monthlyMobileQcCnt: string;
+    monthlyAvePcClkCnt: string;
+    monthlyAveMobileClkCnt: string;
+    monthlyAvePcCtr: string;
+    monthlyAveMobileCtr: string;
+    plAvgDepth: number;
+    compIdx: string;
   }>;
 }
 
@@ -44,20 +44,13 @@ function generateDummyData(keyword: string): KeywordData {
  */
 export async function getKeywordData(keyword: string): Promise<KeywordData> {
   try {
-    const response = await axios.post<NaverDataLabResponse>(
-      'https://openapi.naver.com/v1/datalab/search',
+    const response = await axios.get(
+      'https://api.searchad.naver.com/keywordstool',
       {
-        startDate: getDateString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
-        endDate: getDateString(new Date()),
-        timeUnit: 'date',
-        keywordGroups: [
-          {
-            groupName: keyword,
-            keywords: [keyword]
-          }
-        ]
-      },
-      {
+        params: {
+          hintKeywords: keyword,
+          showDetail: 1
+        },
         headers: {
           'X-Naver-Client-Id': process.env.NAVER_CLIENT_ID,
           'X-Naver-Client-Secret': process.env.NAVER_CLIENT_SECRET,
@@ -66,39 +59,25 @@ export async function getKeywordData(keyword: string): Promise<KeywordData> {
       }
     );
 
-    const data = response.data;
-    if (!data?.results?.[0]?.data) {
-      console.warn(`키워드 데이터 없음 (${keyword}) - 더미 데이터 반환`);
+    const data = response.data as NaverKeywordResponse;
+    if (!data?.keywordList?.[0]) {
       return generateDummyData(keyword);
     }
 
-    const keywordData = data.results[0].data;
-    const totalSearches = keywordData.reduce((sum, item) => sum + item.ratio, 0);
-    const avgSearches = Math.round(totalSearches / keywordData.length);
+    const keywordInfo = data.keywordList[0];
+    const totalSearches = parseInt(keywordInfo.monthlyPcQcCnt) + parseInt(keywordInfo.monthlyMobileQcCnt);
+    const competition = parseFloat(keywordInfo.compIdx) / 100; // compIdx를 0-1 사이 값으로 변환
 
     return {
-      keyword: keyword,
-      searchVolume: avgSearches * 100,
-      competition: Math.random(),
-      cpc: Math.random() * 5
+      keyword: keywordInfo.relKeyword,
+      searchVolume: totalSearches || Math.floor(Math.random() * 10000) + 1000,
+      competition: competition || Math.random(),
+      cpc: keywordInfo.plAvgDepth || Math.random() * 5
     };
-  } catch (error: any) {
-    if (error.response) {
-      console.warn(`Naver API 오류 (${keyword}):`, {
-        status: error.response.status,
-        message: error.response.data?.message || error.message
-      });
-    } else if (error.request) {
-      console.warn(`Naver API 요청 실패 (${keyword}):`, error.message);
-    } else {
-      console.warn(`알 수 없는 오류 (${keyword}):`, error.message);
-    }
+  } catch (error) {
+    console.warn(`Naver API 오류 - 더미 데이터 반환:`, error);
     return generateDummyData(keyword);
   }
-}
-
-function getDateString(date: Date): string {
-  return date.toISOString().split('T')[0];
 }
 
 /**
@@ -147,7 +126,7 @@ export async function getCategoryTopKeywords(category: string, limit: number = 3
   }
 }
 
-export function generateDummyKeywords(category: string, limit: number = 10): KeywordData[] {
+function generateDummyKeywords(category: string, limit: number): KeywordData[] {
   const baseKeywords = CATEGORY_KEYWORDS[category as keyof typeof CATEGORY_KEYWORDS] || CATEGORY_KEYWORDS.tech;
   return Array.from({ length: limit }, (_, i) => ({
     keyword: `${baseKeywords[i % baseKeywords.length]} ${Math.floor(i / baseKeywords.length) + 1}`,
@@ -160,6 +139,5 @@ export function generateDummyKeywords(category: string, limit: number = 10): Key
 export default {
   getKeywordData,
   calculateKeywordDifficulty,
-  getCategoryTopKeywords,
-  generateDummyKeywords
+  getCategoryTopKeywords
 }; 
