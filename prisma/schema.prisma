@@ -1,0 +1,100 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 사용자 모델
+model User {
+  id            String         @id @default(cuid())
+  name          String?
+  email         String         @unique
+  password      String?
+  image         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  savedKeywords SavedKeyword[]
+  searches      Search[]
+}
+
+// 키워드 모델
+model Keyword {
+  id           String         @id @default(cuid())
+  term         String         @unique
+  searchVolume Int?
+  difficulty   Float?
+  category     String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  keywordTrend KeywordTrend[]
+  saved        SavedKeyword[]
+  searches     Search[]
+  related      RelatedKeyword[] @relation("RelatedFrom")
+  relatedTo    RelatedKeyword[] @relation("RelatedTo")
+}
+
+// 키워드 트렌드 모델 (시간에 따른 검색량 데이터)
+model KeywordTrend {
+  id        String   @id @default(cuid())
+  keywordId String
+  keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  date      DateTime
+  volume    Int
+  createdAt DateTime @default(now())
+
+  @@unique([keywordId, date])
+}
+
+// 사용자가 저장한 키워드 모델
+model SavedKeyword {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keywordId String
+  keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, keywordId])
+}
+
+// 검색 기록 모델
+model Search {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  keywordId String
+  keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+// 연관 키워드 모델
+model RelatedKeyword {
+  id            String  @id @default(cuid())
+  keywordId     String
+  keyword       Keyword @relation("RelatedFrom", fields: [keywordId], references: [id], onDelete: Cascade)
+  relatedToId   String
+  relatedTo     Keyword @relation("RelatedTo", fields: [relatedToId], references: [id], onDelete: Cascade)
+  relevanceScore Float?
+
+  @@unique([keywordId, relatedToId])
+}
+
+// 블로그 카테고리 모델
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
