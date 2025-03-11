@@ -18,7 +18,7 @@ export default function Home() {
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("all");
   const [isLoading, setIsLoading] = useState(false);
-  const [results, setResults] = useState<Keyword[]>([]);
+  const [results, setResults] = useState<Keyword[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // 카테고리 리스트
@@ -143,7 +143,7 @@ export default function Home() {
             </div>
           )}
 
-          {results.length > 0 ? (
+          {results && results.length > 0 ? (
             <div className="space-y-6">
               <h3 className="text-xl font-semibold mb-4">검색 결과 ({results.length})</h3>
               <div className="grid gap-4">

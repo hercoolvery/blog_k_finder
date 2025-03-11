@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import keywordStorageService from '@/services/keywordStorageService';
+import keywordScheduler from '@/services/keywordScheduler';
 
 // 임시 데이터 - 실제 구현에서는 데이터베이스와 연동하고 외부 API 호출을 통해 데이터를 가져옵니다
 const exampleKeywords = {
@@ -97,41 +99,75 @@ const exampleKeywords = {
   // 다른 카테고리 항목들...
 };
 
+// 스케줄러 시작
+keywordScheduler.start();
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const query = searchParams.get('query') || '';
-    const category = searchParams.get('category') || 'all';
-    
-    // 실제 구현에서는 여기에 데이터베이스 쿼리 또는 외부 API 호출이 들어갑니다
-    // 예: 구글 키워드 플래너 API, 네이버 검색어 트렌드 API 등
-    
-    let results;
-    
-    if (query) {
-      // 검색어가 있으면 검색어로 필터링
-      results = exampleKeywords[category as keyof typeof exampleKeywords] || [];
-      results = results.filter(item => 
-        item.keyword.toLowerCase().includes(query.toLowerCase())
-      );
-    } else {
-      // 검색어가 없으면 카테고리별 전체 반환
-      results = exampleKeywords[category as keyof typeof exampleKeywords] || [];
+    const category = searchParams.get('category') || undefined;
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const pageSize = parseInt(searchParams.get('pageSize') || '10', 10);
+
+    // 키워드 검색 실행
+    const results = await keywordStorageService.searchKeywords(
+      query,
+      category,
+      page,
+      pageSize
+    );
+
+    // 검색어가 있는 경우, 백그라운드에서 키워드 분석 실행
+    if (query && !results.keywords.some(k => k.term === query)) {
+      keywordStorageService.analyzeAndStoreKeyword(query, category)
+        .catch(error => console.error('키워드 분석 오류:', error));
     }
-    
-    // 검색 결과 반환
-    return NextResponse.json({ 
-      success: true, 
-      results, 
-      category, 
-      query 
+
+    return NextResponse.json({
+      success: true,
+      ...results
     });
-    
   } catch (error) {
     console.error('키워드 검색 API 오류:', error);
-    return NextResponse.json({ 
-      success: false, 
-      error: '키워드 검색 중 오류가 발생했습니다.' 
+    return NextResponse.json({
+      success: false,
+      error: '키워드 검색 중 오류가 발생했습니다.'
+    }, { status: 500 });
+  }
+}
+
+// 키워드 분석 API
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { keyword, category } = body;
+
+    if (!keyword) {
+      return NextResponse.json({
+        success: false,
+        error: '키워드가 필요합니다.'
+      }, { status: 400 });
+    }
+
+    const result = await keywordStorageService.analyzeAndStoreKeyword(keyword, category);
+
+    if (!result) {
+      return NextResponse.json({
+        success: false,
+        error: '키워드 분석에 실패했습니다.'
+      }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('키워드 분석 API 오류:', error);
+    return NextResponse.json({
+      success: false,
+      error: '키워드 분석 중 오류가 발생했습니다.'
     }, { status: 500 });
   }
 } 
